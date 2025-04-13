@@ -66,6 +66,8 @@ Create a `.env` file in the root directory with the following variables:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key
+LANGSMITH_API_KEY=your_langsmith_api_key
+HUGGINGFACE_TOKEN=your_huggingface_token
 MONGODB_USERNAME=your_mongodb_username
 MONGODB_PASSWORD=your_mongodb_password
 MONGODB_CLUSTER=your_cluster_address
