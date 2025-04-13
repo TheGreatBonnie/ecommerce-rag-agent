@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "ecommerce_agent"
+version = "0.1.0"
+description = "Starter"
+authors = ["Markus Ecker <markus.ecker@gmail.com>"]
+license = "MIT"
+
+[project]
+name = "ecommerce_agent"
+version = "0.0.1"
+dependencies = [
+    "langchain-openai",
+    "langchain-anthropic",
+    "langchain",
+    "openai",
+    "langchain-community",
+    "copilotkit",
+    "uvicorn",
+    "python-dotenv",
+    "langchain-core",
+    "langgraph-cli",
+    "sentence_transformers",
+    "pymongo",
+    "einops",
+    "huggingface_hub"
+]
+
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+langchain-openai = "^0.2.1"
+langchain-anthropic = "^0.2.1"
+langchain = "^0.3.1"
+openai = "^1.51.0"
+langchain-community = "^0.3.1"
+copilotkit = "0.1.43"
+uvicorn = "^0.31.0"
+python-dotenv = "^1.0.1"
+langchain-core = "^0.3.25"
+langgraph-cli = {extras = ["inmem"], version = "^0.1.64"}
+sentence_transformers = "^2.2.2"
+pymongo = "^4.6.1"
+einops = "^0.7.0"
+huggingface_hub = "^0.20.3"
+
+[tool.poetry.scripts]
+demo = "ecommerce_agent.demo:main"

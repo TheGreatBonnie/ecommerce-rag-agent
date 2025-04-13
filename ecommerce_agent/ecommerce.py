@@ -1,0 +1,307 @@
+from sentence_transformers import SentenceTransformer 
+from pymongo import MongoClient 
+from pymongo.operations import SearchIndexModel 
+import json
+from typing import List, Dict
+import os
+from urllib.parse import quote_plus
+from openai import OpenAI
+from dotenv import load_dotenv
+from ecommerce_agent.product_data import initial_products
+
+# Load environment variables
+load_dotenv()
+
+# Initialize the embedding model
+model_name = os.getenv("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1")
+model = SentenceTransformer(model_name, trust_remote_code=True)
+
+def get_embedding(text: str) -> List[float]:
+    """Generate vector embeddings for the given text."""
+    embedding = model.encode(text)
+    return embedding.tolist()
+
+def prepare_product_for_embedding(product: Dict) -> Dict:
+    """Prepare a product for embedding by combining relevant fields."""
+    # Combine name, description, and category for better semantic search
+    text_for_embedding = f"{product['name']} {product['description']} {product['category']}"
+    return {
+        **product,
+        "embedding": get_embedding(text_for_embedding)
+    }
+
+def setup_mongodb():
+    """Setup MongoDB connection and create vector search index."""
+    # Get MongoDB connection parameters
+    username = quote_plus(os.getenv("MONGODB_USERNAME", ""))
+    password = quote_plus(os.getenv("MONGODB_PASSWORD", ""))
+    cluster = os.getenv("MONGODB_CLUSTER", "cluster0.qeejxg3.mongodb.net")
+    options = os.getenv("MONGODB_OPTIONS", "retryWrites=true&w=majority&appName=Cluster0")
+    
+    # Construct a properly encoded connection URI
+    mongodb_uri = f"mongodb+srv://{username}:{password}@{cluster}/?{options}"
+    
+    print(f"Connecting to MongoDB...")
+    client = MongoClient(mongodb_uri)
+    db = client["ecommerce_db"]
+    collection = db["products"]
+
+    # Create vector search index with all product fields
+    index_model = SearchIndexModel(
+        definition={
+            "mappings": {
+                "dynamic": True,
+                "fields": {
+                    "embedding": {
+                        "type": "knnVector",
+                        "dimensions": 768,
+                        "similarity": "cosine"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "price": {
+                        "type": "number"
+                    },
+                    "image": {
+                        "type": "string"
+                    },
+                    "category": {
+                        "type": "string"
+                    },
+                    "rating": {
+                        "type": "number"
+                    },
+                    "inStock": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        },
+        name="vector_index"
+    )
+    
+    try:
+        collection.create_search_index(model=index_model)
+    except Exception as e:
+        print(f"Error creating index: {e}")
+
+    return collection
+
+def search_products(collection, query: str, limit: int = 5):
+    """Search products using vector similarity with enhanced filtering options."""
+    # Generate embedding for the query
+    query_embedding = get_embedding(query)
+    
+    # Parse constraints from query
+    price_limit = None
+    in_stock_only = False
+    min_rating = None
+    category_filter = None
+    
+    # Simple parsing for price constraint
+    if "below" in query.lower() and "$" in query:
+        try:
+            price_text = query[query.find("$")+1:]
+            price_limit = float(price_text.split()[0].replace(",", ""))
+        except:
+            pass
+            
+    # Check if query mentions in-stock items
+    if "in stock" in query.lower() or "available" in query.lower():
+        in_stock_only = True
+        
+    # Check if query mentions rating
+    rating_terms = ["star", "rating", "rated"]
+    if any(term in query.lower() for term in rating_terms):
+        for i in range(1, 6):  # 1 to 5 stars
+            if str(i) in query:
+                min_rating = float(i)
+                break
+    
+    # Check for category mentions - this is simplified and could be improved
+    common_categories = ["laptop", "macbook", "gaming pc", "monitor", "keyboard", 
+                        "mouse", "chair", "desk", "accessory", "accessories"]
+    for category in common_categories:
+        if category in query.lower():
+            category_filter = category.capitalize()
+            # Special case for multi-word categories
+            if category == "gaming pc":
+                category_filter = "Gaming PC"
+            break
+
+    # Create the pipeline
+    pipeline = []
+    
+    # First stage: Vector search
+    search_stage = {
+        "$search": {
+            "index": "vector_index",
+            "knnBeta": {
+                "vector": query_embedding,
+                "path": "embedding",
+                "k": limit * 2
+            }
+        }
+    }
+    pipeline.append(search_stage)
+
+    try:
+        # Get results after vector search
+        vector_results = list(collection.aggregate(pipeline))
+        
+        # Apply additional filters
+        filter_stages = []
+        
+        # Price filter
+        if price_limit is not None:
+            filter_stages.append({
+                "$match": {
+                    "price": {"$lte": price_limit}
+                }
+            })
+        
+        # In-stock filter
+        if in_stock_only:
+            filter_stages.append({
+                "$match": {
+                    "inStock": True
+                }
+            })
+        
+        # Rating filter
+        if min_rating is not None:
+            filter_stages.append({
+                "$match": {
+                    "rating": {"$gte": min_rating}
+                }
+            })
+            
+        # Category filter
+        if category_filter is not None:
+            filter_stages.append({
+                "$match": {
+                    "category": {"$regex": category_filter, "$options": "i"}
+                }
+            })
+        
+        # Apply all filters to the pipeline
+        pipeline.extend(filter_stages)
+
+        # Limit results
+        pipeline.append({"$limit": limit})
+
+        # Project fields (exclude _id and embedding)
+        pipeline.append({
+            "$project": {
+                "_id": 0,
+                "embedding": 0
+            }
+        })
+        
+        final_results = list(collection.aggregate(pipeline))
+        return final_results
+        
+    except Exception as e:
+        print(f"Error during product search: {e}")
+        return []
+
+def get_product_recommendation(query: str, context_products: List[Dict]) -> str:
+    """Get AI-generated product recommendations based on the query and retrieved products."""
+    if not context_products:
+        return "I apologize, but I couldn't find any products matching your criteria."
+    
+    context = "\n\nAVAILABLE PRODUCTS:\n"
+    for i, p in enumerate(context_products, 1):
+        context += f"""
+Product {i}:
+- Name: {p['name']}
+- Description: {p['description']}
+- Price: ${p['price']}
+- Category: {p['category']}
+- Rating: {p['rating']} out of 5
+"""
+    
+    prompt = f"""You are a knowledgeable e-commerce assistant. Your task is to recommend products from the AVAILABLE PRODUCTS list below based on the customer's query.
+ONLY recommend products that are listed in the AVAILABLE PRODUCTS section. DO NOT make up or suggest products that are not in this list.
+
+{context}
+
+Customer Query: {query}
+
+Please provide a detailed recommendation that:
+1. ONLY discusses the products listed above
+2. Compares relevant features and prices
+3. Explains why specific products would or wouldn't meet the customer's needs
+4. Considers any price constraints mentioned in the query
+
+Response Format:
+1. Start with a brief introduction
+2. List and compare the most relevant products from the available options
+3. Conclude with a specific recommendation"""
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": "You are a knowledgeable e-commerce assistant. Only recommend products from the provided list. Never suggest products that aren't in the available products list."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=500
+    )
+    
+    return response.choices[0].message.content # type: ignore
+
+def main():
+    print("\n🛍️  E-commerce Product Recommendation System")
+    print("=" * 50)
+    
+    # Setup MongoDB and insert products
+    collection = setup_mongodb()
+    
+    # Clear existing products and insert new ones
+    collection.delete_many({})
+    products_with_embeddings = [prepare_product_for_embedding(p) for p in initial_products]
+    
+    print(f"\nDEBUG: Inserting {len(products_with_embeddings)} products")
+    result = collection.insert_many(products_with_embeddings)
+    print(f"DEBUG: Inserted {len(result.inserted_ids)} products")
+    
+    # Verify products in database
+    count = collection.count_documents({})
+    print(f"DEBUG: Total products in database: {count}")
+    
+    # Example queries
+    example_queries = [
+        "Find me a good laptop for programming under $1500"
+    ]
+
+    for query in example_queries:
+        print(f"\n🔍 Query: {query}")
+        print("-" * 50)
+        
+        # Get relevant products
+        relevant_products = search_products(collection, query)
+        
+        if relevant_products:
+            print("\n📋 Found Products:")
+            for product in relevant_products:
+                print(f"• {product['name']}")
+                print(f"  Price: ${product['price']}")
+                print(f"  Rating: {'⭐' * int(product['rating'])}")
+                print()
+        
+        # Get AI recommendation
+        print("🤖 AI Recommendation:")
+        recommendation = get_product_recommendation(query, relevant_products)
+        print(recommendation)
+        print("=" * 50)
+
+if __name__ == "__main__":
+    main()

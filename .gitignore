@@ -1,0 +1,57 @@
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+.history/
+
+# Deployment
+.vercel
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS
+.DS_Store
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage.xml
+
+.langgraph_api/
