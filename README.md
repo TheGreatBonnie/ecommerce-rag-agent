@@ -44,7 +44,7 @@ This project implements an AI-powered e-commerce agent that:
 1. Clone the repository:
 
 ```bash
-git clone [your-repo-url]
+git clone https://github.com/TheGreatBonnie/ecommerce-rag-agent.git
 cd ecommerce-rag-agent
 ```
 
