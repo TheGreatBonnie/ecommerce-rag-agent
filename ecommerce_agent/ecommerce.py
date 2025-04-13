@@ -1,4 +1,3 @@
-from sentence_transformers import SentenceTransformer 
 from pymongo import MongoClient 
 from pymongo.operations import SearchIndexModel 
 import json
@@ -12,14 +11,19 @@ from ecommerce_agent.product_data import initial_products
 # Load environment variables
 load_dotenv()
 
-# Initialize the embedding model
-model_name = os.getenv("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1")
-model = SentenceTransformer(model_name, trust_remote_code=True)
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Set embedding model
+embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
 def get_embedding(text: str) -> List[float]:
-    """Generate vector embeddings for the given text."""
-    embedding = model.encode(text)
-    return embedding.tolist()
+    """Generate vector embeddings for the given text using OpenAI's API."""
+    response = client.embeddings.create(
+        input=text,
+        model=embedding_model
+    )
+    return response.data[0].embedding
 
 def prepare_product_for_embedding(product: Dict) -> Dict:
     """Prepare a product for embedding by combining relevant fields."""
@@ -54,7 +58,7 @@ def setup_mongodb():
                 "fields": {
                     "embedding": {
                         "type": "knnVector",
-                        "dimensions": 768,
+                        "dimensions": 1536,
                         "similarity": "cosine"
                     },
                     "id": {
@@ -246,7 +250,6 @@ Response Format:
 2. List and compare the most relevant products from the available options
 3. Conclude with a specific recommendation"""
 
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
         model="gpt-4-turbo",
         messages=[

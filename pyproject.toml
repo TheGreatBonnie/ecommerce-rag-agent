@@ -19,10 +19,7 @@ dependencies = [
     "python-dotenv",
     "langchain-core",
     "langgraph-cli",
-    "sentence_transformers",
-    "pymongo",
-    "einops",
-    "huggingface_hub"
+    "pymongo"
 ]
 
 [build-system]
@@ -41,10 +38,7 @@ uvicorn = "^0.31.0"
 python-dotenv = "^1.0.1"
 langchain-core = "^0.3.25"
 langgraph-cli = {extras = ["inmem"], version = "^0.1.64"}
-sentence_transformers = "^2.2.2"
 pymongo = "^4.6.1"
-einops = "^0.7.0"
-huggingface_hub = "^0.20.3"
 
 [tool.poetry.scripts]
 demo = "ecommerce_agent.demo:main"
