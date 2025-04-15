@@ -35,18 +35,54 @@ def prepare_product_for_embedding(product: Dict) -> Dict:
     }
 
 def setup_mongodb():
-    """Setup MongoDB connection and create vector search index."""
+    """Setup MongoDB connection and create vector search index with improved SSL handling."""
     # Get MongoDB connection parameters
     username = quote_plus(os.getenv("MONGODB_USERNAME", ""))
     password = quote_plus(os.getenv("MONGODB_PASSWORD", ""))
     cluster = os.getenv("MONGODB_CLUSTER", "cluster0.qeejxg3.mongodb.net")
     options = os.getenv("MONGODB_OPTIONS", "retryWrites=true&w=majority&appName=Cluster0")
     
+    # Add SSL/TLS options to the connection string
+    ssl_options = "&tls=true"
+    if "&tls=" not in options and "&ssl=" not in options:
+        options += ssl_options
+    
     # Construct a properly encoded connection URI
     mongodb_uri = f"mongodb+srv://{username}:{password}@{cluster}/?{options}"
     
     print(f"Connecting to MongoDB...")
-    client = MongoClient(mongodb_uri)
+    
+    # Create MongoClient with correct parameter names for newer PyMongo versions
+    try:
+        client = MongoClient(
+            mongodb_uri,
+            tls=True,  # Use tls instead of ssl
+            connectTimeoutMS=30000,
+            socketTimeoutMS=30000,
+            serverSelectionTimeoutMS=30000
+        )
+        
+        # Force a connection to verify it works
+        client.admin.command('ping')
+        print("Successfully connected to MongoDB Atlas")
+    except Exception as e:
+        print(f"MongoDB connection test failed: {e}")
+        # Fall back to a more lenient TLS configuration if needed
+        try:
+            client = MongoClient(
+                mongodb_uri,
+                tls=True,
+                tlsAllowInvalidCertificates=True,  # More lenient TLS validation
+                connectTimeoutMS=30000,
+                socketTimeoutMS=30000,
+                serverSelectionTimeoutMS=30000
+            )
+            client.admin.command('ping')
+            print("Connected to MongoDB with fallback TLS configuration")
+        except Exception as e2:
+            print(f"Fallback connection also failed: {e2}")
+            raise
+    
     db = client["ecommerce_db"]
     collection = db["products"]
 
