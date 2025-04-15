@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: ecommerce-rag-agent
+    env: python
+    buildCommand: poetry install
+    startCommand: chmod +x render-start.sh && ./render-start.sh && poetry run demo
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.2
+      - key: PORT
+        value: 8000
+      - key: RENDER
+        value: "true"
+      - key: MONGODB_USERNAME
+        sync: false
+      - key: MONGODB_PASSWORD
+        sync: false
+      - key: MONGODB_CLUSTER
+        value: cluster0.qeejxg3.mongodb.net
+      - key: MONGODB_OPTIONS
+        value: retryWrites=true&w=majority&appName=Cluster0&tls=true
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_TIMEOUT_MS
+        value: 60000
+      - key: OPENAI_MAX_RETRIES
+        value: 5
+      - key: DEBUG
+        value: "true"
+    healthCheckPath: /copilotkit/info

@@ -136,120 +136,152 @@ def setup_mongodb():
 
 def search_products(collection, query: str, limit: int = 5):
     """Search products using vector similarity with enhanced filtering options."""
-    # Generate embedding for the query
-    query_embedding = get_embedding(query)
-    
-    # Parse constraints from query
-    price_limit = None
-    in_stock_only = False
-    min_rating = None
-    category_filter = None
-    
-    # Simple parsing for price constraint
-    if "below" in query.lower() and "$" in query:
-        try:
-            price_text = query[query.find("$")+1:]
-            price_limit = float(price_text.split()[0].replace(",", ""))
-        except:
-            pass
-            
-    # Check if query mentions in-stock items
-    if "in stock" in query.lower() or "available" in query.lower():
-        in_stock_only = True
-        
-    # Check if query mentions rating
-    rating_terms = ["star", "rating", "rated"]
-    if any(term in query.lower() for term in rating_terms):
-        for i in range(1, 6):  # 1 to 5 stars
-            if str(i) in query:
-                min_rating = float(i)
-                break
-    
-    # Check for category mentions - this is simplified and could be improved
-    common_categories = ["laptop", "macbook", "gaming pc", "monitor", "keyboard", 
-                        "mouse", "chair", "desk", "accessory", "accessories"]
-    for category in common_categories:
-        if category in query.lower():
-            category_filter = category.capitalize()
-            # Special case for multi-word categories
-            if category == "gaming pc":
-                category_filter = "Gaming PC"
-            break
-
-    # Create the pipeline
-    pipeline = []
-    
-    # First stage: Vector search
-    search_stage = {
-        "$search": {
-            "index": "vector_index",
-            "knnBeta": {
-                "vector": query_embedding,
-                "path": "embedding",
-                "k": limit * 2
-            }
-        }
-    }
-    pipeline.append(search_stage)
-
     try:
-        # Get results after vector search
-        vector_results = list(collection.aggregate(pipeline))
+        # Generate embedding for the query
+        print(f"Generating embedding for query: {query}")
+        query_embedding = get_embedding(query)
+        print(f"Successfully generated embedding for query")
         
-        # Apply additional filters
-        filter_stages = []
+        # Parse constraints from query
+        price_limit = None
+        in_stock_only = False
+        min_rating = None
+        category_filter = None
         
-        # Price filter
-        if price_limit is not None:
-            filter_stages.append({
-                "$match": {
-                    "price": {"$lte": price_limit}
-                }
-            })
-        
-        # In-stock filter
-        if in_stock_only:
-            filter_stages.append({
-                "$match": {
-                    "inStock": True
-                }
-            })
-        
-        # Rating filter
-        if min_rating is not None:
-            filter_stages.append({
-                "$match": {
-                    "rating": {"$gte": min_rating}
-                }
-            })
+        # Simple parsing for price constraint
+        if "below" in query.lower() or "under" in query.lower() and "$" in query:
+            try:
+                price_text = query[query.find("$")+1:]
+                price_limit = float(price_text.split()[0].replace(",", ""))
+                print(f"Detected price limit: ${price_limit}")
+            except Exception as e:
+                print(f"Error parsing price: {e}")
+                
+        # Check if query mentions in-stock items
+        if "in stock" in query.lower() or "available" in query.lower():
+            in_stock_only = True
             
-        # Category filter
-        if category_filter is not None:
-            filter_stages.append({
-                "$match": {
-                    "category": {"$regex": category_filter, "$options": "i"}
+        # Check if query mentions rating
+        rating_terms = ["star", "rating", "rated"]
+        if any(term in query.lower() for term in rating_terms):
+            for i in range(1, 6):  # 1 to 5 stars
+                if str(i) in query:
+                    min_rating = float(i)
+                    print(f"Detected minimum rating: {min_rating}")
+                    break
+        
+        # Check for category mentions - this is simplified and could be improved
+        common_categories = ["laptop", "macbook", "gaming pc", "monitor", "keyboard", 
+                            "mouse", "chair", "desk", "accessory", "accessories"]
+        for category in common_categories:
+            if category in query.lower():
+                category_filter = category.capitalize()
+                # Special case for multi-word categories
+                if category == "gaming pc":
+                    category_filter = "Gaming PC"
+                print(f"Detected category filter: {category_filter}")
+                break
+
+        # Create the pipeline
+        pipeline = []
+        
+        # First stage: Vector search or find all if vector search fails
+        try:
+            search_stage = {
+                "$search": {
+                    "index": "vector_index",
+                    "knnBeta": {
+                        "vector": query_embedding,
+                        "path": "embedding",
+                        "k": limit * 2
+                    }
                 }
-            })
-        
-        # Apply all filters to the pipeline
-        pipeline.extend(filter_stages)
-
-        # Limit results
-        pipeline.append({"$limit": limit})
-
-        # Project fields (exclude _id and embedding)
-        pipeline.append({
-            "$project": {
-                "_id": 0,
-                "embedding": 0
             }
-        })
-        
-        final_results = list(collection.aggregate(pipeline))
-        return final_results
-        
+            pipeline.append(search_stage)
+            print("Added vector search stage to pipeline")
+        except Exception as e:
+            print(f"Error creating vector search stage: {e}")
+            # If vector search fails, use a simple find operation to return at least some results
+            print("Falling back to basic find operation")
+            # We'll handle this later if the aggregation fails
+
+        try:
+            # Get results after vector search
+            print("Executing MongoDB aggregation pipeline")
+            vector_results = list(collection.aggregate(pipeline))
+            print(f"Found {len(vector_results)} results from initial vector search")
+            
+            # If vector search failed, fall back to basic find
+            if len(vector_results) == 0:
+                print("Vector search returned no results, falling back to basic find")
+                # Try simple find with no vector search
+                all_results = list(collection.find({}, {'_id': 0, 'embedding': 0}).limit(limit * 2))
+                if all_results:
+                    print(f"Basic find returned {len(all_results)} results")
+                    vector_results = all_results
+            
+            # Apply additional filters
+            filter_stages = []
+            filtered_results = vector_results
+            
+            # Apply filters manually if needed
+            if price_limit is not None:
+                filtered_results = [p for p in filtered_results if p.get('price', float('inf')) <= price_limit]
+                print(f"After price filter: {len(filtered_results)} results")
+            
+            if in_stock_only:
+                filtered_results = [p for p in filtered_results if p.get('inStock', False)]
+                print(f"After in-stock filter: {len(filtered_results)} results")
+            
+            if min_rating is not None:
+                filtered_results = [p for p in filtered_results if p.get('rating', 0) >= min_rating]
+                print(f"After rating filter: {len(filtered_results)} results")
+            
+            if category_filter is not None:
+                import re
+                pattern = re.compile(category_filter, re.IGNORECASE)
+                filtered_results = [p for p in filtered_results if 'category' in p and pattern.search(p['category'])]
+                print(f"After category filter: {len(filtered_results)} results")
+            
+            # Limit results
+            final_results = filtered_results[:limit]
+            print(f"Final results count: {len(final_results)}")
+            
+            return final_results
+            
+        except Exception as e:
+            print(f"Error during MongoDB aggregation: {e}")
+            import traceback
+            print(traceback.format_exc())
+            
+            # If aggregation fails, try a basic find operation as a last resort
+            try:
+                print("Trying basic find as fallback")
+                basic_results = list(collection.find({}, {'_id': 0, 'embedding': 0}).limit(limit))
+                print(f"Basic find returned {len(basic_results)} results")
+                return basic_results
+            except Exception as e2:
+                print(f"Basic find also failed: {e2}")
+                # Use products from the initial_products list as a last resort
+                from ecommerce_agent.product_data import initial_products
+                print("Using initial_products list as final fallback")
+                # Return a subset of products that match the query terms if possible
+                query_terms = query.lower().split()
+                matches = []
+                for product in initial_products:
+                    product_text = f"{product['name']} {product['description']} {product['category']}".lower()
+                    if any(term in product_text for term in query_terms):
+                        matches.append(product)
+                
+                # If no matches found, return any products up to the limit
+                if not matches:
+                    return initial_products[:limit]
+                return matches[:limit]
+            
     except Exception as e:
-        print(f"Error during product search: {e}")
+        print(f"Unhandled error in search_products: {e}")
+        import traceback
+        print(traceback.format_exc())
         return []
 
 def get_product_recommendation(query: str, context_products: List[Dict]) -> str:

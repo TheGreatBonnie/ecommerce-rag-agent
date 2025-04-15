@@ -43,17 +43,30 @@ def search_ecommerce(query: str) -> str:
 
     try:
         # Search for relevant products
+        print(f"Searching for products matching: {query}")
         relevant_products = search_products(collection, query)
+        
+        # Log the number of products found for debugging
+        print(f"Found {len(relevant_products)} relevant products for query: {query}")
+        
+        # Check if any products were found
+        if not relevant_products:
+            return "I couldn't find any products matching your criteria. Could you try a different search or broaden your requirements?"
         
         # Store results in agent state for context
         AgentState.last_search_results = relevant_products
         
         # Get AI recommendation based on the found products
+        print(f"Generating recommendation for query: {query}")
         recommendation = get_product_recommendation(query, relevant_products)
         
         return recommendation
     except Exception as e:
-        return f"I apologize, but I encountered an error while searching for products: {str(e)}"
+        error_message = f"Error during product search: {str(e)}"
+        print(error_message)
+        import traceback
+        print(traceback.format_exc())
+        return f"I apologize, but I encountered an error while searching for products. Technical details: {str(e)}"
 
 tools = [
     search_ecommerce
