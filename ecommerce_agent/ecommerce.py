@@ -262,49 +262,45 @@ Response Format:
     return response.choices[0].message.content # type: ignore
 
 def main():
-    print("\n🛍️  E-commerce Product Recommendation System")
-    print("=" * 50)
-    
-    # Setup MongoDB and insert products
     collection = setup_mongodb()
     
-    # Clear existing products and insert new ones
-    collection.delete_many({})
-    products_with_embeddings = [prepare_product_for_embedding(p) for p in initial_products]
+    # Check if products already exist in the database
+    existing_count = collection.count_documents({})
     
-    print(f"\nDEBUG: Inserting {len(products_with_embeddings)} products")
-    result = collection.insert_many(products_with_embeddings)
-    print(f"DEBUG: Inserted {len(result.inserted_ids)} products")
+    # Only populate the database if it's empty
+    if existing_count == 0:
+        print(f"Database empty. Inserting {len(initial_products)} products...")
+        
+        # Use multiprocessing for parallel embedding generation
+        import concurrent.futures
+        
+        # Define a function to prepare products in parallel
+        def prepare_product_batch(products_batch):
+            return [prepare_product_for_embedding(p) for p in products_batch]
+        
+        # Split products into batches for parallel processing
+        batch_size = 10  # Adjust based on your API rate limits
+        product_batches = [initial_products[i:i+batch_size] 
+                          for i in range(0, len(initial_products), batch_size)]
+        
+        products_with_embeddings = []
+        
+        # Process batches in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            batch_results = executor.map(prepare_product_batch, product_batches)
+            
+            # Flatten results from all batches
+            for batch_result in batch_results:
+                products_with_embeddings.extend(batch_result)
+        
+        # Insert all products in one operation
+        result = collection.insert_many(products_with_embeddings)
+        print(f"Successfully inserted {len(result.inserted_ids)} products")
+    else:
+        print(f"Database already contains {existing_count} products. Skipping insertion.")
     
-    # Verify products in database
-    count = collection.count_documents({})
-    print(f"DEBUG: Total products in database: {count}")
-    
-    # Example queries
-    example_queries = [
-        "Find me a good laptop for programming under $1500"
-    ]
-
-    for query in example_queries:
-        print(f"\n🔍 Query: {query}")
-        print("-" * 50)
-        
-        # Get relevant products
-        relevant_products = search_products(collection, query)
-        
-        if relevant_products:
-            print("\n📋 Found Products:")
-            for product in relevant_products:
-                print(f"• {product['name']}")
-                print(f"  Price: ${product['price']}")
-                print(f"  Rating: {'⭐' * int(product['rating'])}")
-                print()
-        
-        # Get AI recommendation
-        print("🤖 AI Recommendation:")
-        recommendation = get_product_recommendation(query, relevant_products)
-        print(recommendation)
-        print("=" * 50)
+    # Return the collection for other functions to use
+    return collection
 
 if __name__ == "__main__":
     main()

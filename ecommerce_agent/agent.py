@@ -12,6 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain.tools import tool
 from langgraph.graph import StateGraph, END
 from langgraph.types import Command
+from langgraph.checkpoint.memory import MemorySaver
 from copilotkit import CopilotKitState
 from copilotkit.langchain import copilotkit_emit_state, copilotkit_customize_config
 from ecommerce_agent.ecommerce import setup_mongodb, search_products, get_product_recommendation, main as setup_ecommerce
@@ -172,5 +173,8 @@ workflow.add_node("tool_node", ToolNode(tools=tools))
 workflow.add_edge("tool_node", "chat_node")
 workflow.set_entry_point("chat_node")
 
-# Compile the workflow graph
-graph = workflow.compile()
+# Create a memory checkpointer for storing conversation state
+memory_checkpointer = MemorySaver()
+
+# Compile the workflow graph with the checkpointer
+graph = workflow.compile(checkpointer=memory_checkpointer)
