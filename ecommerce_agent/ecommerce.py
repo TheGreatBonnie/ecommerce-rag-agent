@@ -199,6 +199,23 @@ def search_products(collection, query: str, limit: int = 5):
             }
             pipeline.append(search_stage)
             print("Added vector search stage to pipeline")
+            
+            # Add a project stage to exclude MongoDB _id field or convert it to string
+            pipeline.append({
+                "$project": {
+                    "_id": 0,  # Exclude the _id field altogether
+                    "id": 1,
+                    "name": 1,
+                    "description": 1,
+                    "price": 1,
+                    "category": 1,
+                    "rating": 1,
+                    "inStock": 1,
+                    "image": 1,
+                    "embedding": 1
+                }
+            })
+            
         except Exception as e:
             print(f"Error creating vector search stage: {e}")
             # If vector search fails, use a simple find operation to return at least some results
@@ -214,7 +231,7 @@ def search_products(collection, query: str, limit: int = 5):
             # If vector search failed, fall back to basic find
             if len(vector_results) == 0:
                 print("Vector search returned no results, falling back to basic find")
-                # Try simple find with no vector search
+                # Try simple find with no vector search - explicitly exclude _id
                 all_results = list(collection.find({}, {'_id': 0, 'embedding': 0}).limit(limit * 2))
                 if all_results:
                     print(f"Basic find returned {len(all_results)} results")
@@ -246,6 +263,20 @@ def search_products(collection, query: str, limit: int = 5):
             # Limit results
             final_results = filtered_results[:limit]
             print(f"Final results count: {len(final_results)}")
+            
+            # Before returning final_results, ensure all ObjectIds are converted to strings
+            for product in final_results:
+                if '_id' in product:
+                    # Convert ObjectId to string if present
+                    from bson import ObjectId
+                    if isinstance(product['_id'], ObjectId):
+                        product['_id'] = str(product['_id'])
+                        # If 'id' field doesn't exist, use the string version of _id
+                        if 'id' not in product:
+                            product['id'] = product['_id']
+                    
+                    # Alternatively, just remove the _id field
+                    # del product['_id']
             
             return final_results
             
@@ -279,7 +310,7 @@ def search_products(collection, query: str, limit: int = 5):
                 return matches[:limit]
             
     except Exception as e:
-        print(f"Unhandled error in search_products: {e}")
+        print(f"Error in search_products: {e}")
         import traceback
         print(traceback.format_exc())
         return []
@@ -289,18 +320,26 @@ def get_product_recommendation(query: str, context_products: List[Dict]) -> str:
     if not context_products:
         return "I apologize, but I couldn't find any products matching your criteria."
     
-    context = "\n\nAVAILABLE PRODUCTS:\n"
-    for i, p in enumerate(context_products, 1):
-        context += f"""
+    try:
+        # Track timing for logging purposes only
+        import time
+        start_time = time.time()
+        
+        # Create context with product information
+        context = "\n\nAVAILABLE PRODUCTS:\n"
+        for i, p in enumerate(context_products, 1):
+            product_link = f"/products/{p['id']}"
+            context += f"""
 Product {i}:
 - Name: {p['name']}
 - Description: {p['description']}
 - Price: ${p['price']}
 - Category: {p['category']}
 - Rating: {p['rating']} out of 5
+- Link: {product_link}
 """
-    
-    prompt = f"""You are a knowledgeable e-commerce assistant. Your task is to recommend products from the AVAILABLE PRODUCTS list below based on the customer's query.
+        
+        prompt = f"""You are a knowledgeable e-commerce assistant. Your task is to recommend products from the AVAILABLE PRODUCTS list below based on the customer's query.
 ONLY recommend products that are listed in the AVAILABLE PRODUCTS section. DO NOT make up or suggest products that are not in this list.
 
 {context}
@@ -312,22 +351,40 @@ Please provide a detailed recommendation that:
 2. Compares relevant features and prices
 3. Explains why specific products would or wouldn't meet the customer's needs
 4. Considers any price constraints mentioned in the query
+5. IMPORTANT: For each product you recommend, include a clickable link in the format: [Product Name](/products/id) - where 'id' is the product ID
 
 Response Format:
 1. Start with a brief introduction
-2. List and compare the most relevant products from the available options
-3. Conclude with a specific recommendation"""
+2. List and compare the most relevant products from the available options, including links to each product in markdown format
+3. Conclude with a specific recommendation
+4. ALWAYS format product links as [Product Name](/products/id)"""
 
-    response = client.chat.completions.create(
-        model="gpt-4-turbo",
-        messages=[
-            {"role": "system", "content": "You are a knowledgeable e-commerce assistant. Only recommend products from the provided list. Never suggest products that aren't in the available products list."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=500
-    )
-    
-    return response.choices[0].message.content # type: ignore
+        # Make API call without timeout parameter
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": "You are a knowledgeable e-commerce assistant. Include markdown links to products in your recommendations. Format as [Product Name](/products/id)."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=800  # Allow for detailed responses
+        )
+        
+        # Log timing for performance monitoring
+        elapsed_time = time.time() - start_time
+        print(f"Recommendation generation time: {elapsed_time:.2f}s")
+        
+        recommendation = response.choices[0].message.content
+        
+        # Check if response is too large
+        if len(recommendation) > 10000:
+            print(f"Warning: Large recommendation generated ({len(recommendation)} chars)")
+            recommendation = recommendation[:9000] + "\n\n[Note: This recommendation was truncated for better performance]"
+            
+        return recommendation
+    except Exception as e:
+        print(f"Error in product recommendation: {str(e)}")
+        # Return a simple error message
+        return f"I apologize, but I encountered an error while generating product recommendations. Please try again with a different query. Error details: {str(e)}"
 
 def main():
     collection = setup_mongodb()

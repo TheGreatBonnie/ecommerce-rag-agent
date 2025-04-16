@@ -42,3 +42,5 @@ pymongo = "^4.6.1"
 
 [tool.poetry.scripts]
 demo = "ecommerce_agent.demo:main"
+clear-cache = "ecommerce_agent.scripts.clear_cache:main"
+test-query = "ecommerce_agent.scripts.test_query:main"
