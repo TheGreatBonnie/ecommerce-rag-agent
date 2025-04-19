@@ -401,15 +401,32 @@ async def chat_node(state: AgentState, config: RunnableConfig) -> Command[Litera
         }
     )
 
-# Create a memory checkpointer for storing conversation state
-memory_checkpointer = MemorySaver()
 
-# Define the workflow graph
+# ---------------------- Workflow Graph Definition ----------------------
+# Define the workflow graph using LangGraph's StateGraph
+# This creates a directed graph where nodes are processing steps and edges define transitions
 workflow = StateGraph(AgentState)
+
+# Add the chat node that handles user messages and AI responses
+# This node processes messages and decides whether to call tools or return a response
 workflow.add_node("chat_node", chat_node)
+
+# Add the tool node that executes tools like product search 
+# This node handles the actual execution of tool functions when requested
 workflow.add_node("tool_node", ToolNode(tools=tools))
+
+# Define the transition from tool_node back to chat_node
+# After a tool is executed, control returns to the chat node to process the results
 workflow.add_edge("tool_node", "chat_node")
+
+# Set the entry point of the graph to the chat node
+# All conversations start at the chat node which processes the initial message
 workflow.set_entry_point("chat_node")
 
+# Create a memory checkpointer for storing conversation state
+# This enables persistence of conversation history between user interactions
+memory_checkpointer = MemorySaver()
+
 # Compile the workflow graph with the checkpointer
+# This creates an executable graph that can process user requests
 graph = workflow.compile(checkpointer=memory_checkpointer)

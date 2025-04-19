@@ -1,3 +1,9 @@
+"""
+This module contains the core e-commerce functionality for the RAG agent.
+It handles MongoDB connection, vector embeddings, product search,
+and AI-powered product recommendations.
+"""
+
 from pymongo import MongoClient 
 from pymongo.operations import SearchIndexModel 
 import json
@@ -8,17 +14,25 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from ecommerce_agent.product_data import initial_products
 
-# Load environment variables
+# Load environment variables from .env file for configuration
 load_dotenv()
 
-# Initialize OpenAI client
+# Initialize OpenAI client with API key from environment variables
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Set embedding model
+# Set embedding model from environment variable or use default
 embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
 def get_embedding(text: str) -> List[float]:
-    """Generate vector embeddings for the given text using OpenAI's API."""
+    """
+    Generate vector embeddings for the given text using OpenAI's API.
+    
+    Args:
+        text: The text to generate embeddings for
+        
+    Returns:
+        A list of floats representing the embedding vector
+    """
     response = client.embeddings.create(
         input=text,
         model=embedding_model
@@ -26,7 +40,15 @@ def get_embedding(text: str) -> List[float]:
     return response.data[0].embedding
 
 def prepare_product_for_embedding(product: Dict) -> Dict:
-    """Prepare a product for embedding by combining relevant fields."""
+    """
+    Prepare a product for embedding by combining relevant fields.
+    
+    Args:
+        product: Product dictionary with standard fields
+        
+    Returns:
+        Product dictionary with added embedding vector
+    """
     # Combine name, description, and category for better semantic search
     text_for_embedding = f"{product['name']} {product['description']} {product['category']}"
     return {
@@ -35,14 +57,19 @@ def prepare_product_for_embedding(product: Dict) -> Dict:
     }
 
 def setup_mongodb():
-    """Setup MongoDB connection and create vector search index with improved SSL handling."""
-    # Get MongoDB connection parameters
+    """
+    Setup MongoDB connection and create vector search index with improved SSL handling.
+    
+    Returns:
+        MongoDB collection for products
+    """
+    # Get MongoDB connection parameters from environment variables
     username = quote_plus(os.getenv("MONGODB_USERNAME", ""))
     password = quote_plus(os.getenv("MONGODB_PASSWORD", ""))
     cluster = os.getenv("MONGODB_CLUSTER", "cluster0.qeejxg3.mongodb.net")
     options = os.getenv("MONGODB_OPTIONS", "retryWrites=true&w=majority&appName=Cluster0")
     
-    # Add SSL/TLS options to the connection string
+    # Add SSL/TLS options to the connection string if not already present
     ssl_options = "&tls=true"
     if "&tls=" not in options and "&ssl=" not in options:
         options += ssl_options
@@ -54,6 +81,7 @@ def setup_mongodb():
     
     # Create MongoClient with correct parameter names for newer PyMongo versions
     try:
+        # First attempt with standard TLS configuration
         client = MongoClient(
             mongodb_uri,
             tls=True,  # Use tls instead of ssl
@@ -83,10 +111,12 @@ def setup_mongodb():
             print(f"Fallback connection also failed: {e2}")
             raise
     
+    # Get the database and collection
     db = client["ecommerce_db"]
     collection = db["products"]
 
     # Create vector search index with all product fields
+    # This enables semantic search using vector embeddings
     index_model = SearchIndexModel(
         definition={
             "mappings": {
@@ -94,9 +124,10 @@ def setup_mongodb():
                 "fields": {
                     "embedding": {
                         "type": "knnVector",
-                        "dimensions": 1536,
-                        "similarity": "cosine"
+                        "dimensions": 1536,  # Dimensions for OpenAI embeddings
+                        "similarity": "cosine"  # Use cosine similarity for comparing vectors
                     },
+                    # Define other fields for filtering and sorting
                     "id": {
                         "type": "string"
                     },
@@ -127,6 +158,7 @@ def setup_mongodb():
         name="vector_index"
     )
     
+    # Create the search index, ignoring errors if it already exists
     try:
         collection.create_search_index(model=index_model)
     except Exception as e:
@@ -135,20 +167,30 @@ def setup_mongodb():
     return collection
 
 def search_products(collection, query: str, limit: int = 5):
-    """Search products using vector similarity with enhanced filtering options."""
+    """
+    Search products using vector similarity with enhanced filtering options.
+    
+    Args:
+        collection: MongoDB collection containing products
+        query: User's search query string
+        limit: Maximum number of products to return
+        
+    Returns:
+        List of product dictionaries matching the search criteria
+    """
     try:
         # Generate embedding for the query
         print(f"Generating embedding for query: {query}")
         query_embedding = get_embedding(query)
         print(f"Successfully generated embedding for query")
         
-        # Parse constraints from query
+        # Parse constraints from query using simple text analysis
         price_limit = None
         in_stock_only = False
         min_rating = None
         category_filter = None
         
-        # Simple parsing for price constraint
+        # Simple parsing for price constraint (e.g., "under $1000")
         if "below" in query.lower() or "under" in query.lower() and "$" in query:
             try:
                 price_text = query[query.find("$")+1:]
@@ -161,7 +203,7 @@ def search_products(collection, query: str, limit: int = 5):
         if "in stock" in query.lower() or "available" in query.lower():
             in_stock_only = True
             
-        # Check if query mentions rating
+        # Check if query mentions rating (e.g., "4 star")
         rating_terms = ["star", "rating", "rated"]
         if any(term in query.lower() for term in rating_terms):
             for i in range(1, 6):  # 1 to 5 stars
@@ -170,7 +212,7 @@ def search_products(collection, query: str, limit: int = 5):
                     print(f"Detected minimum rating: {min_rating}")
                     break
         
-        # Check for category mentions - this is simplified and could be improved
+        # Check for category mentions using a simplified approach
         common_categories = ["laptop", "macbook", "gaming pc", "monitor", "keyboard", 
                             "mouse", "chair", "desk", "accessory", "accessories"]
         for category in common_categories:
@@ -182,18 +224,19 @@ def search_products(collection, query: str, limit: int = 5):
                 print(f"Detected category filter: {category_filter}")
                 break
 
-        # Create the pipeline
+        # Create the MongoDB aggregation pipeline
         pipeline = []
         
         # First stage: Vector search or find all if vector search fails
         try:
+            # Vector search stage using knnBeta for semantic search
             search_stage = {
                 "$search": {
                     "index": "vector_index",
                     "knnBeta": {
                         "vector": query_embedding,
                         "path": "embedding",
-                        "k": limit * 2
+                        "k": limit * 2  # Get more results than needed to allow for filtering
                     }
                 }
             }
@@ -223,7 +266,7 @@ def search_products(collection, query: str, limit: int = 5):
             # We'll handle this later if the aggregation fails
 
         try:
-            # Get results after vector search
+            # Execute the pipeline and get results after vector search
             print("Executing MongoDB aggregation pipeline")
             vector_results = list(collection.aggregate(pipeline))
             print(f"Found {len(vector_results)} results from initial vector search")
@@ -237,34 +280,37 @@ def search_products(collection, query: str, limit: int = 5):
                     print(f"Basic find returned {len(all_results)} results")
                     vector_results = all_results
             
-            # Apply additional filters
+            # Apply additional filters based on query constraints
             filter_stages = []
             filtered_results = vector_results
             
-            # Apply filters manually if needed
+            # Apply price filter if detected in query
             if price_limit is not None:
                 filtered_results = [p for p in filtered_results if p.get('price', float('inf')) <= price_limit]
                 print(f"After price filter: {len(filtered_results)} results")
             
+            # Apply in-stock filter if requested
             if in_stock_only:
                 filtered_results = [p for p in filtered_results if p.get('inStock', False)]
                 print(f"After in-stock filter: {len(filtered_results)} results")
             
+            # Apply rating filter if detected
             if min_rating is not None:
                 filtered_results = [p for p in filtered_results if p.get('rating', 0) >= min_rating]
                 print(f"After rating filter: {len(filtered_results)} results")
             
+            # Apply category filter if detected
             if category_filter is not None:
                 import re
                 pattern = re.compile(category_filter, re.IGNORECASE)
                 filtered_results = [p for p in filtered_results if 'category' in p and pattern.search(p['category'])]
                 print(f"After category filter: {len(filtered_results)} results")
             
-            # Limit results
+            # Limit results to requested amount
             final_results = filtered_results[:limit]
             print(f"Final results count: {len(final_results)}")
             
-            # Before returning final_results, ensure all ObjectIds are converted to strings
+            # Ensure all ObjectIds are converted to strings for serialization
             for product in final_results:
                 if '_id' in product:
                     # Convert ObjectId to string if present
@@ -274,18 +320,16 @@ def search_products(collection, query: str, limit: int = 5):
                         # If 'id' field doesn't exist, use the string version of _id
                         if 'id' not in product:
                             product['id'] = product['_id']
-                    
-                    # Alternatively, just remove the _id field
-                    # del product['_id']
             
             return final_results
             
         except Exception as e:
+            # Handle errors during aggregation
             print(f"Error during MongoDB aggregation: {e}")
             import traceback
             print(traceback.format_exc())
             
-            # If aggregation fails, try a basic find operation as a last resort
+            # Multi-layer fallback strategy if primary search fails
             try:
                 print("Trying basic find as fallback")
                 basic_results = list(collection.find({}, {'_id': 0, 'embedding': 0}).limit(limit))
@@ -293,7 +337,7 @@ def search_products(collection, query: str, limit: int = 5):
                 return basic_results
             except Exception as e2:
                 print(f"Basic find also failed: {e2}")
-                # Use products from the initial_products list as a last resort
+                # Final fallback: use products from the initial_products list
                 from ecommerce_agent.product_data import initial_products
                 print("Using initial_products list as final fallback")
                 # Return a subset of products that match the query terms if possible
@@ -310,22 +354,32 @@ def search_products(collection, query: str, limit: int = 5):
                 return matches[:limit]
             
     except Exception as e:
+        # Catch-all error handler for the entire function
         print(f"Error in search_products: {e}")
         import traceback
         print(traceback.format_exc())
         return []
 
 def get_product_recommendation(query: str, context_products: List[Dict]) -> str:
-    """Get AI-generated product recommendations based on the query and retrieved products."""
+    """
+    Get AI-generated product recommendations based on the query and retrieved products.
+    
+    Args:
+        query: User's original search query
+        context_products: List of product dictionaries to recommend from
+        
+    Returns:
+        Formatted text recommendation with product comparisons and links
+    """
     if not context_products:
         return "I apologize, but I couldn't find any products matching your criteria."
     
     try:
-        # Track timing for logging purposes only
+        # Track timing for performance monitoring
         import time
         start_time = time.time()
         
-        # Create context with product information
+        # Create context with detailed product information for the LLM
         context = "\n\nAVAILABLE PRODUCTS:\n"
         for i, p in enumerate(context_products, 1):
             product_link = f"/products/{p['id']}"
@@ -339,6 +393,7 @@ Product {i}:
 - Link: {product_link}
 """
         
+        # Comprehensive prompt to guide the LLM in generating useful recommendations
         prompt = f"""You are a knowledgeable e-commerce assistant. Your task is to recommend products from the AVAILABLE PRODUCTS list below based on the customer's query.
 ONLY recommend products that are listed in the AVAILABLE PRODUCTS section. DO NOT make up or suggest products that are not in this list.
 
@@ -359,7 +414,7 @@ Response Format:
 3. Conclude with a specific recommendation
 4. ALWAYS format product links as [Product Name](/products/id)"""
 
-        # Make API call without timeout parameter
+        # Make API call to OpenAI for recommendation generation
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
@@ -375,7 +430,7 @@ Response Format:
         
         recommendation = response.choices[0].message.content
         
-        # Check if response is too large
+        # Check if response is too large and truncate if needed
         if len(recommendation) > 10000:
             print(f"Warning: Large recommendation generated ({len(recommendation)} chars)")
             recommendation = recommendation[:9000] + "\n\n[Note: This recommendation was truncated for better performance]"
@@ -383,20 +438,24 @@ Response Format:
         return recommendation
     except Exception as e:
         print(f"Error in product recommendation: {str(e)}")
-        # Return a simple error message
+        # Return a useful error message to the user
         return f"I apologize, but I encountered an error while generating product recommendations. Please try again with a different query. Error details: {str(e)}"
 
 def main():
+    """
+    Main entry point for the e-commerce system.
+    Sets up MongoDB and populates it with products if empty.
+    """
     collection = setup_mongodb()
     
     # Check if products already exist in the database
     existing_count = collection.count_documents({})
     
-    # Only populate the database if it's empty
+    # Only populate the database if it's empty - avoids duplicate inserts
     if existing_count == 0:
         print(f"Database empty. Inserting {len(initial_products)} products...")
         
-        # Use multiprocessing for parallel embedding generation
+        # Use multiprocessing for parallel embedding generation to improve performance
         import concurrent.futures
         
         # Define a function to prepare products in parallel
@@ -410,7 +469,7 @@ def main():
         
         products_with_embeddings = []
         
-        # Process batches in parallel
+        # Process batches in parallel using ThreadPoolExecutor
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             batch_results = executor.map(prepare_product_batch, product_batches)
             
@@ -418,7 +477,7 @@ def main():
             for batch_result in batch_results:
                 products_with_embeddings.extend(batch_result)
         
-        # Insert all products in one operation
+        # Insert all products in one operation for efficiency
         result = collection.insert_many(products_with_embeddings)
         print(f"Successfully inserted {len(result.inserted_ids)} products")
     else:

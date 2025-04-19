@@ -1,4 +1,19 @@
-"""Product data for the ecommerce system."""
+"""
+This module contains the product data for the ecommerce system.
+It defines a comprehensive list of products that will be loaded into the MongoDB database.
+Each product has standard e-commerce fields like id, name, description, price, etc.
+"""
+
+# Initial product catalog with a diverse range of technology and office products
+# Each product contains:
+# - id: Unique identifier for the product
+# - name: Product name
+# - description: Detailed product description
+# - price: Price in USD
+# - image: URL to product image
+# - category: Product category (Laptop, Monitor, etc.)
+# - rating: Customer rating (0-5)
+# - inStock: Availability status
 
 initial_products = [
     {
