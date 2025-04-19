@@ -71,7 +71,9 @@ MONGODB_USERNAME=your_mongodb_username
 MONGODB_PASSWORD=your_mongodb_password
 MONGODB_CLUSTER=your_cluster_address
 MONGODB_OPTIONS=retryWrites=true&w=majority&appName=Cluster0
-EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1
+EMBEDDING_MODEL=text-embedding-3-small
+PYTHON_VERSION="3.12.2"
+PORT="8000"
 ```
 
 ### Running the Application
