@@ -11,14 +11,14 @@ version = "0.0.1"
 dependencies = [
     "langchain-openai",
     "langchain-anthropic",
-    "langchain",
+    "langchain (>=0.3.4,<=0.3.26)",
     "openai",
-    "langchain-community",
-    "copilotkit",
+    "langchain-community (>=0.3.4,<=0.3.26)",
+    "copilotkit (==0.1.62)",
     "uvicorn",
     "python-dotenv",
     "langchain-core",
-    "langgraph-cli",
+    "langgraph-cli[inmem] (>=0.4.0,<0.5.0)",
     "pymongo"
 ]
 
@@ -28,17 +28,17 @@ build-backend = "setuptools.build_meta"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
-langchain-openai = "^0.2.1"
-langchain-anthropic = "^0.2.1"
-langchain = "^0.3.1"
-openai = "^1.51.0"
-langchain-community = "^0.3.1"
-copilotkit = "0.1.43"
-uvicorn = "^0.31.0"
+langchain-openai = "^0.2.14"
+langchain-anthropic = "^0.2.4"
+langchain = "^0.3.26"
+openai = "^1.102.0"
+langchain-community = "^0.3.29"
+copilotkit = "0.1.62"
+uvicorn = "^0.31.1"
 python-dotenv = "^1.0.1"
-langchain-core = "^0.3.25"
-langgraph-cli = {extras = ["inmem"], version = "^0.1.64"}
-pymongo = "^4.6.1"
+langchain-core = "^0.3.75"
+langgraph-cli = {extras = ["inmem"], version = "^0.4.0"}
+pymongo = "^4.14.1"
 
 [tool.poetry.scripts]
 demo = "ecommerce_agent.demo:main"
